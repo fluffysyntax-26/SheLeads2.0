@@ -1,61 +1,87 @@
-import React, { useState } from 'react';
-import { useUser } from '@clerk/clerk-react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useRef, useEffect } from 'react';
+import { useUser, useAuth } from '@clerk/clerk-react';
 import { 
   Send, 
   Paperclip, 
   Mic, 
   Bot, 
-  User, 
-  Plus, 
-  MessageSquare, 
-  History, 
-  Settings, 
-  HelpCircle,
   LayoutDashboard,
   Bell,
-  Share2
+  Share2,
+  Loader2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { chatWithAI } from '../services/api';
 
 const Chat = () => {
   const { user } = useUser();
-  const navigate = useNavigate();
+  const { getToken } = useAuth();
   const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [userProfile, setUserProfile] = useState({});
+  const messagesEndRef = useRef(null);
+
   const [messages, setMessages] = useState([
     {
       id: 1,
       sender: 'bot',
-      text: "Hello Sarah! I'm here to help you navigate financial opportunities. I can provide details on government subsidies, loan schemes, and investment portfolios tailored for women entrepreneurs. What are your goals today?"
-    },
-    {
-      id: 2,
-      sender: 'user',
-      text: "Can you recommend some government schemes for women entrepreneurs starting a tech business?"
-    },
-    {
-      id: 3,
-      sender: 'bot',
-      text: "Absolutely! For a tech startup, here are the top 3 government-backed schemes currently available in your region:",
-      cards: [
-        {
-          title: "Mudra Yojana",
-          desc: "Up to ₹10,00,000 collateral-free loan for small enterprises.",
-          tag: "TOP CHOICE"
-        },
-        {
-          title: "Stree Shakti Package",
-          desc: "Concession in interest rates for businesses with >50% female ownership.",
-          tag: "RECOMMENDED"
-        }
-      ]
+      text: "Hello! I'm NariConnect AI. I can help you find financial schemes tailored to your profile. How can I assist you today?"
     }
   ]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    setMessages([...messages, { id: Date.now(), sender: 'user', text: input }]);
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
+
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
+    
+    const userMessageText = input;
+    const userMessage = { id: Date.now(), sender: 'user', text: userMessageText };
+    setMessages(prev => [...prev, userMessage]);
     setInput('');
+    setIsLoading(true);
+
+    // Prepare chat history
+    const chatHistory = messages.map(msg => ({
+      role: msg.sender === 'user' ? 'user' : 'assistant',
+      content: msg.text
+    }));
+
+    try {
+      const token = await getToken();
+      const data = await chatWithAI(userMessageText, token, chatHistory, userProfile);
+      
+      if (data.user_profile) {
+        setUserProfile(data.user_profile);
+      }
+      
+      const botMessage = {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: data.response,
+        cards: data.schemes?.map(scheme => ({
+          title: scheme.metadata.schemeShortTitle || scheme.metadata.schemeName,
+          desc: scheme.metadata.description ? scheme.metadata.description.substring(0, 120) + "..." : "No description available",
+          tag: scheme.metadata.schemeCategory || "SCHEME"
+        }))
+      };
+      
+      setMessages(prev => [...prev, botMessage]);
+    } catch (error) {
+      console.error("Chat error:", error);
+      setMessages(prev => [...prev, {
+        id: Date.now() + 1,
+        sender: 'bot',
+        text: "I'm sorry, I encountered an error while processing your request. Please try again later."
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -99,10 +125,10 @@ const Chat = () => {
               
               <div className={`max-w-2xl space-y-4 ${msg.sender === 'user' ? 'items-end flex flex-col' : ''}`}>
                 <div className={`p-6 rounded-2xl shadow-sm ${msg.sender === 'user' ? 'bg-rose-500 text-white rounded-tr-none' : 'bg-white text-gray-700 rounded-tl-none'}`}>
-                  <p className="leading-relaxed">{msg.text}</p>
+                  <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                 </div>
 
-                {msg.cards && (
+                {msg.cards && msg.cards.length > 0 && (
                   <div className="grid md:grid-cols-2 gap-4 w-full">
                     {msg.cards.map((card, idx) => (
                       <div key={idx} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer">
@@ -110,10 +136,10 @@ const Chat = () => {
                           <div className="p-2 bg-rose-50 rounded-lg text-rose-500">
                             <LayoutDashboard size={20} />
                           </div>
-                          <span className="text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-1 rounded-full">{card.tag}</span>
+                          <span className="text-[10px] font-bold bg-rose-100 text-rose-600 px-2 py-1 rounded-full truncate max-w-[120px]">{card.tag}</span>
                         </div>
-                        <h4 className="font-bold text-gray-900 mb-2">{card.title}</h4>
-                        <p className="text-sm text-gray-500">{card.desc}</p>
+                        <h4 className="font-bold text-gray-900 mb-2 line-clamp-2">{card.title}</h4>
+                        <p className="text-sm text-gray-500 line-clamp-3">{card.desc}</p>
                       </div>
                     ))}
                   </div>
@@ -121,6 +147,23 @@ const Chat = () => {
               </div>
             </motion.div>
           ))}
+          
+          {isLoading && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex gap-4"
+            >
+              <div className="w-10 h-10 rounded-full bg-rose-500 flex items-center justify-center flex-shrink-0">
+                <Bot className="text-white w-6 h-6" />
+              </div>
+              <div className="p-6 rounded-2xl shadow-sm bg-white text-gray-700 rounded-tl-none flex items-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin text-rose-500" />
+                <span className="text-gray-500">Thinking...</span>
+              </div>
+            </motion.div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
@@ -136,7 +179,8 @@ const Chat = () => {
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSend()}
               placeholder="Type your message about financial schemes..."
-              className="w-full pl-12 pr-24 py-4 bg-white border border-gray-200 rounded-2xl shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent placeholder-gray-400"
+              disabled={isLoading}
+              className="w-full pl-12 pr-24 py-4 bg-white border border-gray-200 rounded-2xl shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
             />
             
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
@@ -145,7 +189,8 @@ const Chat = () => {
               </button>
               <button 
                 onClick={handleSend}
-                className="p-2 bg-rose-500 text-white rounded-xl hover:bg-rose-600 transition-colors shadow-md shadow-rose-500/20"
+                disabled={isLoading || !input.trim()}
+                className="p-2 bg-rose-500 text-white rounded-xl hover:bg-rose-600 transition-colors shadow-md shadow-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Send size={20} />
               </button>
