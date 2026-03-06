@@ -73,42 +73,32 @@ def vectorize_schemes(filepath: str = "myscheme_rag_dataset.json"):
     schemes = load_schemes_from_json(filepath)
     print(f"Loaded {len(schemes)} schemes. Generating embeddings...")
 
-    # We process in batches to avoid memory issues and timeouts
-    batch_size = 100
-    total_processed = 0
+    points = []
+    for i, scheme in enumerate(schemes):
+        if i % 100 == 0:
+            print(f"Processing scheme {i}/{len(schemes)}...")
 
-    for i in range(0, len(schemes), batch_size):
-        batch = schemes[i:i + batch_size]
-        print(f"Processing batch {i} to {min(i + batch_size, len(schemes))}...")
+        embedding = get_embedding(scheme["text"])
         
-        batch_points = []
-        for j, scheme in enumerate(batch):
-            global_idx = i + j
-            embedding = get_embedding(scheme["text"])
-            
-            # Use slug as the ID if available in metadata, otherwise use the provided ID
-            slug = scheme["metadata"].get("slug", scheme["id"])
+        # Use slug as the ID if available in metadata, otherwise use the provided ID
+        slug = scheme["metadata"].get("slug", scheme["id"])
 
-            batch_points.append(
-                PointStruct(
-                    id=global_idx,
-                    vector=embedding,
-                    payload={
-                        "scheme_id": slug,
-                        "text": scheme["text"],
-                        **scheme["metadata"],
-                    },
-                )
+        points.append(
+            PointStruct(
+                id=i,
+                vector=embedding,
+                payload={
+                    "scheme_id": slug,
+                    "text": scheme["text"],
+                    **scheme["metadata"],
+                },
             )
-        
-        try:
-            client.upsert(collection_name=COLLECTION_NAME, points=batch_points)
-            total_processed += len(batch_points)
-        except Exception as e:
-            print(f"Error uploading batch {i}: {e}")
+        )
 
-    print(f"Successfully vectorized {total_processed} schemes.")
-    return {"status": "success", "count": total_processed}
+    client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+    print(f"Successfully vectorized {len(schemes)} schemes.")
+    return {"status": "success", "count": len(schemes)}
 
 
 def search_schemes(query: str, n_results: int = 5) -> list[dict]:
