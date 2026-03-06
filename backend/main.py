@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.routers import chat, admin
+from app.routers import chat, admin, schemes, applications
 from app.db.mongo import close_database
 from app.config import OLLAMA_HOST
 from app.services.ollama_service import client as ollama_client
@@ -38,6 +38,7 @@ app.add_middleware(
 
 app.include_router(chat.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(schemes.router, prefix="/api")
 
 
 @app.get("/")
